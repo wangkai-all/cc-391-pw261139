@@ -32,3 +32,9 @@ test-results/
 *.sqlite3-shm
 *.sqlite3-journal
 !*.traineddata.gz
+
+# 本地演示数据与 Python 缓存
+demo-data/
+demo-compare/
+__pycache__/
+*.pyc

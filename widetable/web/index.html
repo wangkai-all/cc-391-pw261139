@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流式窄转宽 · 分段宽表控制台</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #171e2e; --panel2: #1e2740;
+    --line: #2a3550; --fg: #e6ebf5; --muted: #8a97b1;
+    --accent: #5b9dff; --green: #3ecf8e; --amber: #f5a524;
+    --red: #f36d7d; --null: #45506b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 13px/1.55 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .pill { background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 3px 11px; color: var(--muted); white-space: nowrap; }
+  .pill b { color: var(--fg); }
+  .pill.run b { color: var(--green); }
+  .pill.paused b { color: var(--amber); }
+  main { padding: 18px 20px; display: grid;
+    grid-template-columns: 330px 1fr; gap: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 14px 16px; }
+  .card h2 { font-size: 12.5px; margin: 0 0 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .06em; }
+  .card + .card { margin-top: 14px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 3px; }
+  input, select { width: 100%; background: var(--panel2); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font-size: 13px; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  button { background: var(--accent); color: #0b1220; border: 0; border-radius: 7px;
+    padding: 8px 14px; font-weight: 600; cursor: pointer; margin-top: 10px; font-size: 13px; }
+  button.ghost { background: var(--panel2); color: var(--fg); border: 1px solid var(--line); }
+  button.warn { background: var(--amber); color: #201600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .msg { margin-top: 8px; font-size: 12px; min-height: 16px; }
+  .msg.ok { color: var(--green); } .msg.err { color: var(--red); }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  th, td { border: 1px solid var(--line); padding: 5px 8px; text-align: right;
+    white-space: nowrap; }
+  th { background: var(--panel2); color: var(--muted); font-weight: 600;
+    position: sticky; top: 0; }
+  th.k, td.k { text-align: left; color: var(--muted); }
+  td.null { color: var(--null); font-style: italic; }
+  td.zero { color: var(--amber); }
+  td.fixed { box-shadow: inset 3px 0 0 var(--green); }
+  tr:hover td { background: #1b2438; }
+  .tablewrap { max-height: 470px; overflow: auto; border: 1px solid var(--line);
+    border-radius: 8px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .tabs button { margin: 0; }
+  .tabs button.active { background: var(--green); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12.5px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  .bad { color: var(--red); font-weight: 600; } .good { color: var(--green); font-weight: 600; }
+  .conflict { font-family: ui-monospace, monospace; font-size: 11.5px;
+    color: var(--muted); white-space: pre-wrap; word-break: break-all;
+    border-bottom: 1px solid var(--line); padding: 6px 0; }
+  .legend { color: var(--muted); font-size: 11.5px; margin-top: 8px; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    vertical-align: middle; margin: 0 4px 0 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>流式窄转宽 · 分段宽表控制台</h1>
+  <span class="pill">模式号 gen <b id="h-gen">-</b></span>
+  <span class="pill">窄分段 <b id="h-narrow">-</b></span>
+  <span class="pill">稀疏宽分段 <b id="h-sparse">-</b></span>
+  <span class="pill">回填分段 <b id="h-backfill">-</b></span>
+  <span class="pill" id="h-bf">回填 <b>-</b></span>
+  <span class="pill">重写 <b id="h-rewrite">-</b> 次 / <b id="h-bytes">-</b> B</span>
+  <span class="pill">测量项 <b id="h-metrics">-</b></span>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h2>1 · 新增测量项（迟到列）</h2>
+      <label>测量项名称（字母数字/下划线）</label>
+      <input id="m-name" placeholder="m_new_sensor">
+      <button id="m-add">注册测量项</button>
+      <div class="msg" id="m-msg"></div>
+      <div class="legend">注册即推进 gen，回填进程将整体重置并按新列重写历史；
+        稀疏旧文件保持不动，旧列缺失读作 null 而非 0。</div>
+    </div>
+
+    <div class="card">
+      <h2>2 · 修正单元（人工值，晚到任务不可覆盖）</h2>
+      <div class="row2">
+        <div><label>时间戳 ts</label><input id="c-ts" type="number" placeholder="0"></div>
+        <div><label>实体 entity</label><input id="c-entity" placeholder="E000"></div>
+      </div>
+      <div class="row2">
+        <div><label>测量项 metric</label><input id="c-metric" placeholder="m_temp"></div>
+        <div><label>新值 v</label><input id="c-v" type="number" step="any"></div>
+      </div>
+      <label>备注（可选）</label><input id="c-note" placeholder="现场校准">
+      <button id="c-save">提交修正</button>
+      <div class="msg" id="c-msg"></div>
+      <div class="legend">修正版本号基号 1e9，恒新于任何自动数据，
+        修正只进覆盖层、不重写分段；两条读取路径同时生效。</div>
+    </div>
+
+    <div class="card">
+      <h2>3 · 回填控制</h2>
+      <button class="warn" id="bf-pause">暂停回填</button>
+      <button class="ghost" id="bf-resume">恢复回填</button>
+      <div class="msg" id="bf-msg"></div>
+      <div class="legend">暂停期间查询自动回退稀疏路径，结果仍正确，
+        compare 页可看到回退段数与读放大变化。</div>
+    </div>
+
+    <div class="card">
+      <h2>4 · 最近冲突 / 晚到拦截</h2>
+      <div id="conflicts" style="max-height:230px;overflow:auto"></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <h2>5 · 读取结果与路径对比</h2>
+      <div class="tabs">
+        <button data-path="sparse" class="active">稀疏直读（拼接）</button>
+        <button data-path="backfill">回填直读</button>
+        <button id="btn-compare">比较两条路径</button>
+        <span style="flex:1"></span>
+        <label style="margin:0;display:flex;align-items:center;gap:6px">
+          行数上限 <input id="limit" type="number" value="100" style="width:90px">
+        </label>
+        <button class="ghost" id="btn-refresh">刷新</button>
+      </div>
+      <div id="compare-box" class="kv" style="margin-bottom:12px"></div>
+      <div class="tablewrap"><table id="grid"><thead></thead><tbody></tbody></table></div>
+      <div class="legend">
+        <span class="swatch" style="background:var(--null)"></span>null = 该测量项尚未出现/真实缺失
+        <span class="swatch" style="background:var(--amber)"></span>0 = 显式测量零值
+        <span class="swatch" style="background:var(--green)"></span>绿条 = 人工修正单元
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let currentPath = "sparse";
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {
+    headers: {"Content-Type": "application/json"}, ...opts,
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.status);
+  return data;
+}
+function flash(el, text, ok = true) {
+  el.textContent = text; el.className = "msg " + (ok ? "ok" : "err");
+  setTimeout(() => { el.textContent = ""; el.className = "msg"; }, 4000);
+}
+function fmtBytes(n) {
+  if (n > 1048576) return (n / 1048576).toFixed(2) + " MB";
+  if (n > 1024) return (n / 1024).toFixed(1) + " KB";
+  return n + " B";
+}
+
+async function refreshState() {
+  const s = await api("/api/state");
+  $("h-gen").textContent = s.gen;
+  $("h-narrow").textContent = s.narrow_segments;
+  $("h-sparse").textContent = s.sparse_segments;
+  $("h-backfill").textContent = s.backfill_segments;
+  $("h-metrics").textContent = s.metrics.join(", ") || "（无）";
+  $("h-rewrite").textContent = s.backfill.rewrites;
+  $("h-bytes").textContent = fmtBytes(s.backfill.bytes_written);
+  const pill = $("h-bf");
+  pill.className = "pill " + (s.backfill.paused ? "paused" : "run");
+  pill.querySelector("b").textContent = s.backfill.paused ? "已暂停" : "运行中";
+  $("bf-pause").disabled = s.backfill.paused;
+  $("bf-resume").disabled = !s.backfill.paused;
+  $("conflicts").innerHTML = s.recent_conflicts.length
+    ? s.recent_conflicts.slice().reverse()
+        .map(c => `<div class="conflict">${JSON.stringify(c)}</div>`).join("")
+    : `<div class="legend">暂无冲突记录</div>`;
+}
+
+function renderGrid(data) {
+  const thead = $("grid").querySelector("thead");
+  const tbody = $("grid").querySelector("tbody");
+  thead.innerHTML = "<tr><th class='k'>ts</th><th class='k'>entity</th>" +
+    data.columns.map(c => `<th>${c}</th>`).join("") + "</tr>";
+  const corr = new Set(Object.keys({}));
+  tbody.innerHTML = data.rows.map(r => {
+    const tds = data.columns.map(m => {
+      const cell = r.cells[m];
+      if (cell === null || cell === undefined)
+        return `<td class="null">null</td>`;
+      const fixed = (cell.source || "").includes("correction");
+      const cls = cell.v === 0 ? "zero" : "";
+      return `<td class="${cls}${fixed ? " fixed" : ""}" title="ver ${JSON.stringify(cell.ver)} · ${cell.source ?? ""}">${cell.v}</td>`;
+    }).join("");
+    return `<tr><td class="k">${r.ts}</td><td class="k">${r.entity}</td>${tds}</tr>`;
+  }).join("");
+}
+
+async function loadRead(path) {
+  currentPath = path;
+  document.querySelectorAll(".tabs button[data-path]").forEach(b =>
+    b.classList.toggle("active", b.dataset.path === path));
+  $("compare-box").innerHTML = "";
+  const limit = $("limit").value || 100;
+  const data = await api(`/api/read?path=${path}&limit=${limit}`);
+  renderGrid(data);
+}
+
+async function compare() {
+  const r = await api("/api/compare");
+  const a = r.sparse_stats, b = r.backfill_stats;
+  const rows = [
+    ["逐单元一致", r.equal ? `<span class="good">是（${r.row_count} 行）</span>`
+                            : `<span class="bad">否，${r.mismatches.length} 处不一致</span>`],
+    ["稀疏路径", `打开 ${a.files_opened} 文件 · 读 ${fmtBytes(a.bytes_read)} · 晚到拦截 ${a.rejected_late}`],
+    ["回填路径", `打开 ${b.files_opened} 文件 · 读 ${fmtBytes(b.bytes_read)} · 回退稀疏 ${b.fallback_sparse} 段`],
+    ["回填累计重写成本", `${b.rewrites} 次 · ${fmtBytes(b.rewrite_bytes)}（暂停=${b.paused}）`],
+    ["读放大结论", b.files_opened <= a.files_opened
+      ? `回填少开 ${a.files_opened - b.files_opened} 个文件，但历史重写已花费上述字节`
+      : "回填暂停/未追平，需回退稀疏，文件数不占优"],
+  ];
+  $("compare-box").innerHTML = rows.map(([k, v]) =>
+    `<span>${k}</span><span>${v}</span>`).join("") +
+    (r.mismatches.length ? `<span>不一致明细</span><span class="bad">${
+      JSON.stringify(r.mismatches.slice(0, 5))}</span>` : "");
+  await loadRead("backfill");
+}
+
+$("m-add").onclick = async () => {
+  try {
+    const r = await api("/api/metrics", {method: "POST",
+      body: JSON.stringify({metric: $("m-name").value})});
+    flash($("m-msg"), r.added.length
+      ? `已注册 ${r.added.join(",")}，gen 推进到 ${r.gen}` : "该测量项已存在");
+    $("m-name").value = "";
+    await refreshState();
+  } catch (e) { flash($("m-msg"), e.message, false); }
+};
+$("c-save").onclick = async () => {
+  try {
+    const r = await api("/api/corrections", {method: "POST", body: JSON.stringify({
+      ts: Number($("c-ts").value), entity: $("c-entity").value,
+      metric: $("c-metric").value, v: Number($("c-v").value),
+      note: $("c-note").value,
+    })});
+    flash($("c-msg"), `修正已接受：${JSON.stringify(r.cell.ver)}`);
+    await refreshState(); await loadRead(currentPath);
+  } catch (e) { flash($("c-msg"), e.message, false); }
+};
+$("bf-pause").onclick = async () => {
+  await api("/api/backfill/pause", {method: "POST", body: "{}"});
+  flash($("bf-msg"), "回填已暂停"); await refreshState();
+};
+$("bf-resume").onclick = async () => {
+  await api("/api/backfill/resume", {method: "POST", body: "{}"});
+  flash($("bf-msg"), "回填已恢复"); await refreshState();
+};
+document.querySelectorAll(".tabs button[data-path]").forEach(b =>
+  b.onclick = () => loadRead(b.dataset.path));
+$("btn-refresh").onclick = () => loadRead(currentPath);
+$("btn-compare").onclick = compare;
+
+refreshState(); loadRead("sparse");
+setInterval(refreshState, 2000);
+setInterval(() => loadRead(currentPath), 4000);
+</script>
+</body>
+</html>
